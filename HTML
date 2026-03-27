@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>DocScan — スキャン & PDF化</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap');
+  :root{--bg:#0a0a0f;--surface:#12121a;--surface2:#1a1a26;--border:#2a2a40;--accent:#6ee7b7;--accent2:#818cf8;--danger:#f87171;--text:#f0f0f8;--muted:#6b6b8a}
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);height:100dvh;display:flex;flex-direction:column;overflow:hidden}
+  header{padding:14px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0}
+  .logo{font-family:'Syne',sans-serif;font-weight:800;font-size:1.25rem;letter-spacing:-.03em}
+  .logo span{color:var(--accent)}
+  .count-badge{background:var(--accent2);color:#fff;font-size:.75rem;font-weight:600;padding:3px 10px;border-radius:999px;font-family:'Syne',sans-serif;transition:all .3s}
+  .count-badge.zero{background:var(--border);color:var(--muted)}
+  .mode-bar{display:flex;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0}
+  .mode-tab{flex:1;padding:10px 6px;text-align:center;cursor:pointer;font-size:.8rem;color:var(--muted);border:none;background:none;font-family:'DM Sans',sans-serif;border-bottom:2px solid transparent;transition:all .2s}
+  .mode-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+  .main{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  .view{display:none;flex:1;flex-direction:column;min-height:0}
+  .view.active{display:flex}
+
+/* CAMERA */
+#cameraView{position:relative;background:#000}
+#videoEl{width:100%;height:100%;object-fit:cover;display:block}
+.scan-frame{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:75%;aspect-ratio:.77;max-height:65%;pointer-events:none}
+.corner{position:absolute;width:28px;height:28px;border-color:var(–accent);border-style:solid;opacity:.9}
+.corner.tl{top:0;left:0;border-width:3px 0 0 3px;border-radius:4px 0 0 0}
+.corner.tr{top:0;right:0;border-width:3px 3px 0 0;border-radius:0 4px 0 0}
+.corner.bl{bottom:0;left:0;border-width:0 0 3px 3px;border-radius:0 0 0 4px}
+.corner.br{bottom:0;right:0;border-width:0 3px 3px 0;border-radius:0 0 4px 0}
+.scan-line{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(–accent),transparent);animation:scanLine 2.5s ease-in-out infinite;opacity:.8}
+@keyframes scanLine{0%{top:0%;opacity:0}10%{opacity:.8}90%{opacity:.8}100%{top:100%;opacity:0}}
+.camera-hint{position:absolute;bottom:130px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.65);backdrop-filter:blur(8px);border:1px solid var(–border);color:var(–accent);font-size:.78rem;padding:6px 14px;border-radius:999px;white-space:nowrap;font-weight:500}
+.camera-error{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:32px;background:var(–bg);text-align:center}
+.camera-error-icon{font-size:3rem}
+.camera-error h3{font-family:‘Syne’,sans-serif;font-size:1rem;margin-bottom:4px}
+.camera-error p{color:var(–muted);font-size:.83rem;line-height:1.7}
+.camera-controls{position:absolute;bottom:0;left:0;right:0;padding:20px 24px 32px;display:flex;align-items:center;justify-content:space-between;background:linear-gradient(to top,rgba(0,0,0,.8),transparent)}
+.ctrl-btn{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);color:#fff;border-radius:50%;width:48px;height:48px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:1.1rem;transition:all .2s;backdrop-filter:blur(8px)}
+.ctrl-btn:active{transform:scale(.9)}
+.shutter-btn{width:72px;height:72px;border-radius:50%;background:#fff;border:4px solid rgba(255,255,255,.4);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;box-shadow:0 0 0 2px #fff,0 0 20px rgba(255,255,255,.3)}
+.shutter-btn:active{transform:scale(.88)}
+.shutter-btn::after{content:’’;width:52px;height:52px;border-radius:50%;background:#fff;border:2px solid #ddd}
+
+/* UPLOAD */
+#uploadView{background:var(–bg);align-items:center;justify-content:center;padding:32px 20px}
+.upload-zone{width:100%;max-width:340px;border:2px dashed var(–border);border-radius:20px;padding:44px 24px;display:flex;flex-direction:column;align-items:center;gap:14px;cursor:pointer;transition:all .25s;text-align:center}
+.upload-zone.drag{border-color:var(–accent);background:rgba(110,231,183,.05)}
+.upload-icon{font-size:3.5rem}
+.upload-title{font-family:‘Syne’,sans-serif;font-size:1.1rem;font-weight:700}
+.upload-sub{color:var(–muted);font-size:.82rem;line-height:1.6}
+.upload-btn-label{display:inline-block;background:var(–accent);color:#0a0a0f;font-family:‘Syne’,sans-serif;font-weight:700;font-size:.9rem;padding:12px 28px;border-radius:12px;cursor:pointer;transition:all .2s;margin-top:4px}
+.upload-btn-label:hover{filter:brightness(1.1)}
+#fileInput{display:none}
+
+/* PROCESSING */
+#processingView{align-items:center;justify-content:center;background:var(–bg);gap:20px}
+.spinner{width:56px;height:56px;border:3px solid var(–border);border-top-color:var(–accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.processing-text{font-family:‘Syne’,sans-serif;font-size:1rem;color:var(–muted)}
+
+/* PREVIEW */
+#previewView{background:var(–bg)}
+.preview-header{padding:16px 20px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(–border);flex-shrink:0}
+.preview-title{font-family:‘Syne’,sans-serif;font-weight:700;font-size:1rem}
+.preview-canvas-wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:20px;min-height:0;background:#050508}
+#previewCanvas{max-width:100%;max-height:100%;border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,.6);object-fit:contain;display:block}
+.preview-actions{padding:16px 20px 28px;display:flex;gap:12px;border-top:1px solid var(–border);background:var(–surface);flex-shrink:0}
+
+/* GALLERY */
+#galleryView{background:var(–bg)}
+.gallery-header{padding:20px 20px 12px;flex-shrink:0}
+.gallery-title{font-family:‘Syne’,sans-serif;font-size:1.4rem;font-weight:800;margin-bottom:4px}
+.gallery-sub{color:var(–muted);font-size:.83rem}
+.gallery-grid{flex:1;overflow-y:auto;padding:12px 16px;display:grid;grid-template-columns:repeat(2,1fr);gap:10px;min-height:0}
+.gallery-item{position:relative;border-radius:10px;overflow:hidden;aspect-ratio:.77;background:var(–surface2);cursor:pointer;transition:transform .2s}
+.gallery-item:active{transform:scale(.96)}
+.gallery-item img{width:100%;height:100%;object-fit:cover;display:block}
+.item-num{position:absolute;top:8px;left:8px;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);color:var(–accent);font-family:‘Syne’,sans-serif;font-weight:700;font-size:.72rem;padding:3px 8px;border-radius:6px}
+.item-del{position:absolute;top:8px;right:8px;background:rgba(248,113,113,.85);color:#fff;border:none;border-radius:6px;width:28px;height:28px;font-size:.9rem;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.item-del:active{transform:scale(.85)}
+.gallery-empty{grid-column:1/-1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:60px 20px;color:var(–muted)}
+.gallery-empty-icon{font-size:3rem;opacity:.4}
+.gallery-empty-text{font-size:.9rem;text-align:center;line-height:1.5}
+.gallery-footer{padding:14px 16px 28px;display:flex;gap:10px;border-top:1px solid var(–border);background:var(–surface);flex-shrink:0}
+.btn{flex:1;padding:14px;border-radius:12px;border:none;font-family:‘Syne’,sans-serif;font-weight:700;font-size:.9rem;cursor:pointer;transition:all .2s;letter-spacing:.01em}
+.btn:active{transform:scale(.97)}
+.btn-outline{background:transparent;border:1.5px solid var(–border);color:var(–muted)}
+.btn-outline:hover{border-color:var(–accent2);color:var(–accent2)}
+.btn-primary{background:var(–accent);color:#0a0a0f}
+.btn-primary:hover{filter:brightness(1.1)}
+.btn-primary:disabled{opacity:.4;cursor:not-allowed}
+
+/* PDF OVERLAY */
+#pdfOverlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);backdrop-filter:blur(8px);z-index:100;align-items:center;justify-content:center;flex-direction:column;gap:16px}
+#pdfOverlay.show{display:flex}
+.pdf-progress-bar-wrap{width:200px;height:4px;background:var(–border);border-radius:999px;overflow:hidden}
+.pdf-progress-bar{height:100%;background:var(–accent);border-radius:999px;transition:width .3s;width:0%}
+.pdf-label{font-family:‘Syne’,sans-serif;color:var(–text);font-size:1rem;font-weight:700}
+.pdf-sublabel{color:var(–muted);font-size:.8rem}
+.flash{position:fixed;inset:0;background:#fff;z-index:200;pointer-events:none;opacity:0;transition:opacity .05s}
+.flash.on{opacity:1}
+canvas{display:none}
+</style>
+
+</head>
+<body>
+
+<header>
+  <div class="logo">Doc<span>Scan</span></div>
+  <div class="count-badge zero" id="countBadge">0 枚</div>
+</header>
+
+<div class="mode-bar">
+  <button class="mode-tab active" id="tabCamera" onclick="setMode('camera')">📷 カメラ</button>
+  <button class="mode-tab" id="tabUpload" onclick="setMode('upload')">📁 ファイル選択</button>
+  <button class="mode-tab" id="tabGallery" onclick="setMode('gallery')">🖼️ 一覧</button>
+</div>
+
+<div class="main">
+  <!-- Camera -->
+  <div class="view active" id="cameraView">
+    <video id="videoEl" autoplay playsinline muted></video>
+    <div class="scan-frame" id="scanFrame">
+      <div class="corner tl"></div><div class="corner tr"></div>
+      <div class="corner bl"></div><div class="corner br"></div>
+      <div class="scan-line"></div>
+    </div>
+    <div class="camera-hint" id="cameraHint">📄 書類をフレーム内に合わせてください</div>
+    <div class="camera-error" id="cameraError">
+      <div class="camera-error-icon">📵</div>
+      <h3>カメラを使用できません</h3>
+      <p>このブラウザ環境ではカメラAPIがブロックされています。<br><br>
+      👉「ファイル選択」タブから写真をアップロードするか、<br>
+      このHTMLをダウンロードしてブラウザで直接開いてください。</p>
+    </div>
+    <div class="camera-controls" id="cameraControls">
+      <button class="ctrl-btn" id="flipBtn">🔄</button>
+      <button class="shutter-btn" id="shutterBtn"></button>
+      <button class="ctrl-btn" onclick="setMode('gallery')">🖼️</button>
+    </div>
+  </div>
+
+  <!-- Upload -->
+
+  <div class="view" id="uploadView">
+    <div class="upload-zone" id="uploadZone">
+      <div class="upload-icon">📂</div>
+      <div class="upload-title">写真を選択してスキャン</div>
+      <div class="upload-sub">スマホで撮影した書類の写真を選ぶと<br>自動で補正・トリミングします。<br>複数枚まとめて選択もOK。</div>
+      <label class="upload-btn-label">
+        📷 写真を選ぶ
+        <input type="file" id="fileInput" accept="image/*" multiple>
+      </label>
+    </div>
+  </div>
+
+  <!-- Processing -->
+
+  <div class="view" id="processingView">
+    <div class="spinner"></div>
+    <div class="processing-text" id="processingText">書類を検出中…</div>
+  </div>
+
+  <!-- Preview -->
+
+  <div class="view" id="previewView">
+    <div class="preview-header"><div class="preview-title">✅ スキャン結果</div></div>
+    <div class="preview-canvas-wrap">
+      <canvas id="previewCanvas" style="display:block;"></canvas>
+    </div>
+    <div class="preview-actions">
+      <button class="btn btn-outline" id="retakeBtn">やり直し</button>
+      <button class="btn btn-primary" id="addPageBtn">追加 ✚</button>
+    </div>
+  </div>
+
+  <!-- Gallery -->
+
+  <div class="view" id="galleryView">
+    <div class="gallery-header">
+      <div class="gallery-title">スキャン済み</div>
+      <div class="gallery-sub" id="gallerySub">書類が追加されていません</div>
+    </div>
+    <div class="gallery-grid" id="galleryGrid"></div>
+    <div class="gallery-footer">
+      <button class="btn btn-outline" id="addMoreBtn">＋ 追加</button>
+      <button class="btn btn-primary" id="pdfBtn" disabled>📄 PDF化</button>
+    </div>
+  </div>
+</div>
+
+<div id="pdfOverlay">
+  <div class="pdf-label">PDF 作成中…</div>
+  <div class="pdf-progress-bar-wrap"><div class="pdf-progress-bar" id="pdfProgressBar"></div></div>
+  <div class="pdf-sublabel" id="pdfSubLabel">準備中</div>
+</div>
+<div class="flash" id="flashEl"></div>
+<canvas id="captureCanvas"></canvas>
+
+<script>
+const pages=[], state={mode:'camera'};
+let stream=null, facingMode='environment', processingQueue=[];
+
+const $=id=>document.getElementById(id);
+const videoEl=$('videoEl'), captureCanvas=$('captureCanvas'), previewCanvas=$('previewCanvas');
+const pdfProgressBar=$('pdfProgressBar'), pdfSubLabel=$('pdfSubLabel');
+
+// ── VIEW ──
+function showView(name){
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  $(name+'View').classList.add('active');
+}
+function setMode(m){
+  state.mode=m;
+  document.querySelectorAll('.mode-tab').forEach(t=>t.classList.remove('active'));
+  $('tab'+m.charAt(0).toUpperCase()+m.slice(1)).classList.add('active');
+  if(m==='camera'){showView('camera');startCamera();}
+  else if(m==='upload'){showView('upload');stopCamera();}
+  else if(m==='gallery'){showView('gallery');renderGallery();stopCamera();}
+}
+function stopCamera(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}}
+
+// ── CAMERA ──
+async function startCamera(){
+  $('cameraError').style.display='none';
+  $('scanFrame').style.display='block';
+  $('cameraHint').style.display='block';
+  $('cameraControls').style.display='flex';
+  videoEl.style.display='block';
+  stopCamera();
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode,width:{ideal:1920},height:{ideal:1080}},audio:false});
+    videoEl.srcObject=stream;
+  }catch(e){
+    videoEl.style.display='none';
+    $('scanFrame').style.display='none';
+    $('cameraHint').style.display='none';
+    $('cameraControls').style.display='none';
+    $('cameraError').style.display='flex';
+  }
+}
+$('flipBtn').onclick=async()=>{facingMode=facingMode==='environment'?'user':'environment';await startCamera();};
+$('shutterBtn').onclick=()=>{
+  const fl=$('flashEl'); fl.classList.add('on'); setTimeout(()=>fl.classList.remove('on'),100);
+  const vw=videoEl.videoWidth,vh=videoEl.videoHeight;
+  if(!vw||!vh){alert('カメラが準備できていません');return;}
+  captureCanvas.width=vw; captureCanvas.height=vh;
+  captureCanvas.getContext('2d').drawImage(videoEl,0,0);
+  processRaw(captureCanvas.getContext('2d').getImageData(0,0,vw,vh),vw,vh,false);
+};
+
+// ── FILE UPLOAD ──
+$('fileInput').onchange=e=>{
+  const files=Array.from(e.target.files); if(!files.length)return;
+  processingQueue=[...files]; e.target.value='';
+  processNextFile();
+};
+const uz=$('uploadZone');
+uz.ondragover=e=>{e.preventDefault();uz.classList.add('drag');};
+uz.ondragleave=()=>uz.classList.remove('drag');
+uz.ondrop=e=>{
+  e.preventDefault();uz.classList.remove('drag');
+  const files=Array.from(e.dataTransfer.files).filter(f=>f.type.startsWith('image/'));
+  if(!files.length)return;
+  processingQueue=[...files]; processNextFile();
+};
+
+function processNextFile(){
+  if(!processingQueue.length){showView('gallery');renderGallery();return;}
+  const file=processingQueue.shift();
+  showView('processing');
+  $('processingText').textContent=`処理中… (残り ${processingQueue.length+1} 枚)`;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    const img=new Image();
+    img.onload=()=>{
+      const w=img.naturalWidth,h=img.naturalHeight;
+      captureCanvas.width=w; captureCanvas.height=h;
+      const ctx=captureCanvas.getContext('2d'); ctx.drawImage(img,0,0);
+      const id=ctx.getImageData(0,0,w,h);
+      const batch=processingQueue.length>0;
+      processRaw(id,w,h,batch);
+    };
+    img.src=ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── PROCESS ──
+function processRaw(imageData,w,h,batch){
+  showView('processing');
+  $('processingText').textContent='書類を検出中…';
+  setTimeout(()=>{
+    const corners=detectDoc(imageData,w,h);
+    const corr=warpPerspective(imageData,w,h,corners);
+    const enh=enhance(corr.id,corr.w,corr.h);
+    if(batch){
+      const c=document.createElement('canvas'); c.width=enh.w; c.height=enh.h;
+      c.getContext('2d').putImageData(enh.id,0,0);
+      pages.push({dataUrl:c.toDataURL('image/jpeg',.92),width:enh.w,height:enh.h});
+      updateBadge(); processNextFile();
+    } else {
+      previewCanvas.width=enh.w; previewCanvas.height=enh.h;
+      previewCanvas.getContext('2d').putImageData(enh.id,0,0);
+      showView('preview');
+    }
+  },60);
+}
+
+function detectDoc(imageData,W,H){
+  const d=imageData.data, gray=new Float32Array(W*H);
+  for(let i=0;i<W*H;i++) gray[i]=.299*d[i*4]+.587*d[i*4+1]+.114*d[i*4+2];
+  const edge=new Float32Array(W*H); let mx=0;
+  for(let y=1;y<H-1;y++) for(let x=1;x<W-1;x++){
+    const gx=-gray[(y-1)*W+(x-1)]+gray[(y-1)*W+(x+1)]-2*gray[y*W+(x-1)]+2*gray[y*W+(x+1)]-gray[(y+1)*W+(x-1)]+gray[(y+1)*W+(x+1)];
+    const gy=-gray[(y-1)*W+(x-1)]-2*gray[(y-1)*W+x]-gray[(y-1)*W+(x+1)]+gray[(y+1)*W+(x-1)]+2*gray[(y+1)*W+x]+gray[(y+1)*W+(x+1)];
+    const e=Math.sqrt(gx*gx+gy*gy); edge[y*W+x]=e; if(e>mx)mx=e;
+  }
+  const th=mx*.22, pad=.06;
+  let T=Math.floor(H*pad),B=Math.floor(H*(1-pad)),L=Math.floor(W*pad),R=Math.floor(W*(1-pad));
+  for(let y=Math.floor(H*pad);y<H*.5;y++){let c=0;for(let x=L;x<R;x++)if(edge[y*W+x]>th)c++;if(c>(R-L)*.1){T=y;break;}}
+  for(let y=Math.floor(H*(1-pad));y>H*.5;y--){let c=0;for(let x=L;x<R;x++)if(edge[y*W+x]>th)c++;if(c>(R-L)*.1){B=y;break;}}
+  for(let x=Math.floor(W*pad);x<W*.5;x++){let c=0;for(let y=T;y<B;y++)if(edge[y*W+x]>th)c++;if(c>(B-T)*.1){L=x;break;}}
+  for(let x=Math.floor(W*(1-pad));x>W*.5;x--){let c=0;for(let y=T;y<B;y++)if(edge[y*W+x]>th)c++;if(c>(B-T)*.1){R=x;break;}}
+  const m=12;
+  return [{x:Math.max(0,L-m),y:Math.max(0,T-m)},{x:Math.min(W-1,R+m),y:Math.max(0,T-m)},{x:Math.min(W-1,R+m),y:Math.min(H-1,B+m)},{x:Math.max(0,L-m),y:Math.min(H-1,B+m)}];
+}
+
+function warpPerspective(imageData,sW,sH,corners){
+  const[tl,tr,br,bl]=corners;
+  const dW=Math.round(Math.max(Math.hypot(tr.x-tl.x,tr.y-tl.y),Math.hypot(br.x-bl.x,br.y-bl.y)));
+  const dH=Math.round(Math.max(Math.hypot(bl.x-tl.x,bl.y-tl.y),Math.hypot(br.x-tr.x,br.y-tr.y)));
+  const dst=[{x:0,y:0},{x:dW,y:0},{x:dW,y:dH},{x:0,y:dH}];
+  const H=homography(dst,corners);
+  const src=imageData.data, out=new ImageData(dW,dH), od=out.data;
+  for(let y=0;y<dH;y++) for(let x=0;x<dW;x++){
+    const dn=H[6]*x+H[7]*y+1, sx=(H[0]*x+H[1]*y+H[2])/dn, sy=(H[3]*x+H[4]*y+H[5])/dn;
+    const x0=Math.floor(sx),y0=Math.floor(sy),x1=x0+1,y1=y0+1,fx=sx-x0,fy=sy-y0;
+    const di=(y*dW+x)*4;
+    if(x0>=0&&x1<sW&&y0>=0&&y1<sH){
+      const a=(y0*sW+x0)*4,b=(y0*sW+x1)*4,c=(y1*sW+x0)*4,d=(y1*sW+x1)*4;
+      for(let k=0;k<3;k++) od[di+k]=src[a+k]*(1-fx)*(1-fy)+src[b+k]*fx*(1-fy)+src[c+k]*(1-fx)*fy+src[d+k]*fx*fy;
+      od[di+3]=255;
+    }else if(x0>=0&&x0<sW&&y0>=0&&y0<sH){const i=(y0*sW+x0)*4;od[di]=src[i];od[di+1]=src[i+1];od[di+2]=src[i+2];od[di+3]=255;}
+  }
+  return{id:out,w:dW,h:dH};
+}
+
+function homography(s,d){
+  const A=[],b=[];
+  for(let i=0;i<4;i++){const sx=s[i].x,sy=s[i].y,dx=d[i].x,dy=d[i].y;A.push([sx,sy,1,0,0,0,-sx*dx,-sy*dx]);b.push(dx);A.push([0,0,0,sx,sy,1,-sx*dy,-sy*dy]);b.push(dy);}
+  const n=8,M=A.map((r,i)=>[...r,b[i]]);
+  for(let c=0;c<n;c++){
+    let mr=c;for(let r=c+1;r<n;r++)if(Math.abs(M[r][c])>Math.abs(M[mr][c]))mr=r;[M[c],M[mr]]=[M[mr],M[c]];
+    if(Math.abs(M[c][c])<1e-10)continue;
+    const sc=M[c][c];for(let j=c;j<=n;j++)M[c][j]/=sc;
+    for(let r=0;r<n;r++){if(r===c)continue;const f=M[r][c];for(let j=c;j<=n;j++)M[r][j]-=f*M[c][j];}
+  }
+  return M.map(r=>r[n]);
+}
+
+function enhance(imageData,W,H){
+  const d=imageData.data, gray=new Float32Array(W*H);
+  for(let i=0;i<W*H;i++) gray[i]=.299*d[i*4]+.587*d[i*4+1]+.114*d[i*4+2];
+  const bs=Math.max(15,Math.floor(Math.min(W,H)/30))|1, half=(bs-1)/2;
+  const intg=new Float64Array((W+1)*(H+1));
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++) intg[(y+1)*(W+1)+(x+1)]=gray[y*W+x]+intg[y*(W+1)+(x+1)]+intg[(y+1)*(W+1)+x]-intg[y*(W+1)+x];
+  const out=new Uint8ClampedArray(d.length);
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    const x1=Math.max(0,x-half),y1=Math.max(0,y-half),x2=Math.min(W-1,x+half),y2=Math.min(H-1,y+half);
+    const cnt=(x2-x1+1)*(y2-y1+1);
+    const s=intg[(y2+1)*(W+1)+(x2+1)]-intg[y1*(W+1)+(x2+1)]-intg[(y2+1)*(W+1)+x1]+intg[y1*(W+1)+x1];
+    const idx=(y*W+x)*4, v=gray[y*W+x]<(s/cnt)*.88?0:255;
+    out[idx]=out[idx+1]=out[idx+2]=v; out[idx+3]=255;
+  }
+  return{id:new ImageData(out,W,H),w:W,h:H};
+}
+
+// ── PREVIEW ──
+$('retakeBtn').onclick=()=>{if(state.mode==='upload')showView('upload');else showView('camera');};
+$('addPageBtn').onclick=()=>{
+  pages.push({dataUrl:previewCanvas.toDataURL('image/jpeg',.92),width:previewCanvas.width,height:previewCanvas.height});
+  updateBadge(); setMode('gallery');
+};
+
+// ── GALLERY ──
+function renderGallery(){
+  const grid=$('galleryGrid'); grid.innerHTML='';
+  $('gallerySub').textContent=pages.length===0?'書類が追加されていません':`${pages.length} 枚の書類`;
+  $('pdfBtn').disabled=pages.length===0;
+  if(!pages.length){grid.innerHTML='<div class="gallery-empty"><div class="gallery-empty-icon">📄</div><div class="gallery-empty-text">書類をスキャンして<br>ここに追加しましょう</div></div>';return;}
+  pages.forEach((p,i)=>{
+    const div=document.createElement('div'); div.className='gallery-item';
+    div.innerHTML=`<img src="${p.dataUrl}"><div class="item-num">${i+1}</div><button class="item-del">✕</button>`;
+    div.querySelector('.item-del').onclick=e=>{e.stopPropagation();pages.splice(i,1);updateBadge();renderGallery();};
+    grid.appendChild(div);
+  });
+}
+function updateBadge(){const n=pages.length;$('countBadge').textContent=`${n} 枚`;$('countBadge').classList.toggle('zero',n===0);}
+$('addMoreBtn').onclick=()=>{if(state.mode==='upload')showView('upload');else setMode('camera');};
+
+// ── PDF ──
+$('pdfBtn').onclick=async()=>{
+  if(!pages.length)return;
+  $('pdfOverlay').classList.add('show'); pdfProgressBar.style.width='0%'; pdfSubLabel.textContent='準備中…';
+  await new Promise(r=>setTimeout(r,50));
+  try{
+    const{jsPDF}=window.jspdf, first=pages[0], land=first.width>first.height;
+    const pdf=new jsPDF({orientation:land?'landscape':'portrait',unit:'mm',format:'a4'});
+    const pw=land?297:210, ph=land?210:297;
+    for(let i=0;i<pages.length;i++){
+      if(i>0)pdf.addPage();
+      const pg=pages[i]; pdfSubLabel.textContent=`${i+1} / ${pages.length} ページ処理中`; pdfProgressBar.style.width=`${((i+.5)/pages.length)*100}%`;
+      const ar=pg.width/pg.height, par=pw/ph; let iw,ih,ox=0,oy=0;
+      if(ar>par){iw=pw;ih=pw/ar;oy=(ph-ih)/2;}else{ih=ph;iw=ph*ar;ox=(pw-iw)/2;}
+      pdf.addImage(pg.dataUrl,'JPEG',ox,oy,iw,ih);
+      await new Promise(r=>setTimeout(r,20)); pdfProgressBar.style.width=`${((i+1)/pages.length)*100}%`;
+    }
+    pdfSubLabel.textContent='保存中…'; await new Promise(r=>setTimeout(r,80));
+    const now=new Date(), fn=`scan_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.pdf`;
+    pdf.save(fn); pdfProgressBar.style.width='100%'; pdfSubLabel.textContent='✅ 完了！';
+    setTimeout(()=>$('pdfOverlay').classList.remove('show'),1200);
+  }catch(e){$('pdfOverlay').classList.remove('show');alert('エラー: '+e.message);}
+};
+
+// ── INIT ──
+startCamera(); updateBadge();
+</script>
+
+</body>
+</html>
